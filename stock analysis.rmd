@@ -1,0 +1,368 @@
+---
+title: "stock analysis"
+output:
+  pdf_document: default
+  html_document: default
+editor_options:
+  markdown:
+    wrap: 120
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(error = TRUE)
+knitr::opts_chunk$set(fig.show = 'asis')
+knitr::opts_chunk$set(fig.width = 7, fig.height = 7)
+
+
+# Import libraries
+library(gridExtra)
+library(knitr)
+library(kableExtra)
+library(lme4)
+library(ICC)
+library(knitr)
+library(tidyverse)
+library(tidyquant)
+library(xts)
+library(PerformanceAnalytics)
+library(corrplot)
+library(dplyr)
+
+
+# Import the CSV file
+df <- read.csv("stockdataformatted.csv")
+
+# Identify missing values
+sapply(df, function(x) sum(is.na(x)))
+
+# Split the dataframe by the 'Company.Name' column
+list_of_companies <- split(df, f = df$Company.Name)
+
+summary(df)
+
+
+# Initialize a list to hold correlation results for each company
+correlations_by_company <- list()
+
+
+
+
+```
+
+
+```{r}
+# Select only the numeric columns
+numeric_df <- df %>% select_if(is.numeric)
+
+# Calculate the correlation matrix
+cor_matrix <- cor(numeric_df, use = "complete.obs")
+
+# Visualize the correlation matrix
+corrplot(cor_matrix, method = "circle")
+```
+This is likely inaccurate due to a repeating of quarters for every company
+
+```{r}
+
+# Code below gets the correlations for the first 10 companies between last sale price and the rest of the variables
+
+
+# Get the names of the first 10 companies from the list
+first_10_companies <- names(list_of_companies)[1:10]
+
+# Loop through each of the first 10 companies
+for(n in first_10_companies) {
+  # Select the current company's dataframe
+  df <- list_of_companies[[n]]
+
+  # Determine the third-last variable name
+  third_last_var <- names(df)[ncol(df)-2]
+
+  # Select only the numeric columns and the third-last variable
+  numeric_df <- df %>% select_if(is.numeric) %>% select(third_last_var, everything())
+
+  # Initialize a vector to store the correlations
+  cor_vector <- numeric(ncol(numeric_df))
+  names(cor_vector) <- names(numeric_df)
+
+  # Calculate the correlation of the third-last variable with all others
+  for(column_name in names(numeric_df)) {
+    if(sum(complete.cases(numeric_df[[third_last_var]], numeric_df[[column_name]])) > 1) {
+      # Compute the correlation if there are enough complete cases
+      cor_vector[column_name] <- cor(numeric_df[[third_last_var]], numeric_df[[column_name]], use = "complete.obs")
+    } else {
+      # Assign NA if not enough complete cases
+      cor_vector[column_name] <- NA
+    }
+  }
+
+  # Check if there are any non-NA values to plot
+  if(all(is.na(cor_vector))) {
+    cat(paste("Correlation plot for", n, "cannot be generated due to insufficient data.\n"))
+  } else {
+    # Construct a matrix from the vector for plotting
+    cor_matrix <- matrix(cor_vector, nrow = 1, byrow = TRUE)
+    colnames(cor_matrix) <- names(cor_vector)
+    rownames(cor_matrix) <- third_last_var
+
+    # Plot title with the company name for clarity
+    plot_title <- paste("Correlation with", third_last_var, "for", n)
+
+    # Visualize the correlation matrix using corrplot
+    print(corrplot(cor_matrix, method = "circle", title = plot_title, is.corr = FALSE))
+  }
+}
+```
+As you can see here each company depends on different factors which affect its price
+
+```{r}
+# Code gets the mean correlation matrix between last sale price and all other variables
+
+
+# Initialize a list to store the correlation data for each company
+cor_data_list <- list()
+
+# Get the names of the first 500 companies from the list
+all_companies <- names(list_of_companies)
+
+# Utility function to check if there's sufficient data to compute the standard deviation
+is_var_constant <- function(x) {
+  length(unique(na.omit(x))) <= 1
+}
+
+# Loop through each of the companies
+for(n in all_companies) {
+  # Check if the company's data frame exists and is not NULL
+  if (!is.null(list_of_companies[[n]]) && ncol(list_of_companies[[n]]) > 2) {
+    # Select the current company's dataframe
+    df <- list_of_companies[[n]]
+
+    # Determine the third-last variable name
+    third_last_var <- names(df)[ncol(df)-2]
+
+    # Select only the numeric columns
+    numeric_df <- df %>% select_if(is.numeric)
+
+    # Initialize a vector to store the correlations for the current company
+    cor_vector <- rep(NA, ncol(numeric_df))
+
+    # Calculate the correlation of the third-last variable with all other numeric variables
+    for(i in seq_along(numeric_df)) {
+      # Check if the variable is constant (no variance)
+      if (!is_var_constant(numeric_df[[third_last_var]]) && !is_var_constant(numeric_df[[i]])) {
+        cor_vector[i] <- cor(numeric_df[[third_last_var]], numeric_df[[i]], use = "complete.obs")
+      }
+      # Else, the result is already NA
+    }
+
+    # Name the elements of the vector with the column names
+    names(cor_vector) <- names(numeric_df)
+
+    # Store the results in the cor_data_list
+    cor_data_list[[n]] <- cor_vector
+  } else {
+    # Print a message if the company's data frame does not exist or is NULL
+    cat(paste("The data frame for company", n, "does not exist or is NULL.\n"))
+  }
+}
+
+
+
+  # Name the elements of the vector with the column names
+  names(cor_vector) <- names(numeric_df)
+
+  # Store the results in the cor_data_list
+  cor_data_list[[n]] <- cor_vector
+
+# Combine all the correlation vectors into one data frame
+cor_data_frame <- do.call(rbind, cor_data_list)
+
+# Compute the mean of the correlation coefficients for the third-last variable across all companies
+mean_correlation <- colMeans(cor_data_frame, na.rm = TRUE)
+
+# Output the mean correlation as a single row data frame
+mean_correlation_df <- as.data.frame(t(mean_correlation))
+
+corrplot(as.matrix(mean_correlation_df), is.corr=FALSE)
+```
+On average most variables are correlated with price, but many of these variables are also correlated with each other
+
+```{r}
+# Calculating the mean full correlation matrix
+
+
+# Initialize a list to store the full correlation matrix for each company
+full_cor_matrices <- list()
+common_columns <- NULL
+
+
+# Loop through each company
+for(n in all_companies) {
+  df <- list_of_companies[[n]]
+  if (!is.null(df) && ncol(df) > 2) {
+    numeric_df <- df %>%
+      select_if(is.numeric) %>%
+      na.omit()
+
+    # Check if there's enough variation in each column to calculate correlation
+    numeric_df <- numeric_df %>%
+      select_if(~sd(.) != 0)
+
+    if(nrow(numeric_df) >= 2) {
+      cor_matrix <- cor(numeric_df)
+      full_cor_matrices[[n]] <- cor_matrix
+      
+      # Identify common columns if not already identified
+      if (is.null(common_columns)) {
+        common_columns <- names(numeric_df)
+      } else {
+        common_columns <- intersect(common_columns, names(numeric_df))
+      }
+    }
+  }
+}
+
+# Function to compute the mean correlation matrix from the list of matrices
+compute_mean_cor_matrix <- function(cor_matrices, common_columns) {
+  # Subset matrices to only common columns
+  cor_matrices <- lapply(cor_matrices, function(m) m[common_columns, common_columns])
+  
+  # Calculate mean correlation matrix using Reduce to sum the matrices
+  sum_matrix <- Reduce("+", cor_matrices)
+  counts <- Reduce("+", lapply(cor_matrices, function(m) !is.na(m)))
+  
+  # Calculate the mean matrix by dividing sum by counts
+  mean_matrix <- sum_matrix / counts
+  
+  # Replace NaN values with NA
+  mean_matrix[is.nan(mean_matrix)] <- NA
+  return(mean_matrix)
+}
+
+# Ensure we have correlation matrices and common columns to work with
+if(length(full_cor_matrices) > 0 && !is.null(common_columns)) {
+  mean_cor_matrix <- compute_mean_cor_matrix(full_cor_matrices, common_columns)
+  
+  # Visualize the mean correlation matrix
+  corrplot(mean_cor_matrix, method = "circle", title = "Mean Correlation Matrix Across All Companies")
+} else {
+  cat("No correlation matrices available to compute the mean matrix.\n")
+}
+
+```
+This is way more accurate than the full correlation matrix from earlier
+
+```{r}
+
+# Does the same thing as the mean correlation matrix between last sale price and all other variables but groups by industry
+
+# Initialize a list to store the correlation data for each company
+cor_data_list <- list()
+
+# Get the names of the first 500 companies from the list
+all_companies <- names(list_of_companies)
+
+# Utility function to check if there's sufficient data to compute the standard deviation
+is_var_constant <- function(x) {
+  length(unique(na.omit(x))) <= 1
+}
+
+# Loop through each of the companies
+for(n in all_companies) {
+  # Check if the company's data frame exists and is not NULL
+  if (!is.null(list_of_companies[[n]]) && ncol(list_of_companies[[n]]) > 2) {
+    # Select the current company's dataframe
+    df <- list_of_companies[[n]]
+
+    # Determine the third-last variable name
+    third_last_var <- names(df)[ncol(df)-2]
+
+    # Select only the numeric columns
+    numeric_df <- df %>% select_if(is.numeric)
+
+    # Initialize a vector to store the correlations for the current company
+    cor_vector <- rep(NA, ncol(numeric_df))
+
+    # Calculate the correlation of the third-last variable with all other numeric variables
+    for(i in seq_along(numeric_df)) {
+      # Check if the variable is constant (no variance)
+      if (!is_var_constant(numeric_df[[third_last_var]]) && !is_var_constant(numeric_df[[i]])) {
+        cor_vector[i] <- cor(numeric_df[[third_last_var]], numeric_df[[i]], use = "complete.obs")
+      }
+      
+      # Else, the result is already NA
+    }
+
+    # Name the elements of the vector with the column names
+    names(cor_vector) <- names(numeric_df)
+    
+    # Inside the loop, after calculating cor_vector for each company:
+    cor_vector['Primary.Industry'] <- df$Primary.Industry[1]
+
+
+    # Store the results in the cor_data_list
+    cor_data_list[[n]] <- cor_vector
+  } else {
+    # Print a message if the company's data frame does not exist or is NULL
+    cat(paste("The data frame for company", n, "does not exist or is NULL.\n"))
+  }
+}
+
+
+  # Name the elements of the vector with the column names
+  names(cor_vector) <- names(numeric_df)
+
+  # Store the results in the cor_data_list
+  cor_data_list[[n]] <- cor_vector
+  
+# Convert cor_data_list to a data frame
+cor_data_frame_with_industry <- do.call(rbind, cor_data_list)
+
+# Convert to a proper data frame and handle factor conversion for the 'Primary.Industry' column
+cor_data_frame_with_industry <- data.frame(cor_data_frame_with_industry, stringsAsFactors = FALSE)
+cor_data_frame_with_industry$Primary.Industry <- as.factor(cor_data_frame_with_industry$Primary.Industry)
+
+# Calculate the mean correlation by industry
+mean_correlation_by_industry <- cor_data_frame_with_industry %>%
+  group_by(Primary.Industry)
+
+
+library(dplyr)
+library(tibble)
+
+industry_filtered <- na.omit(mean_correlation_by_industry) 
+
+
+num_cols <- ncol(industry_filtered) - 1  # Get the number of columns minus 1
+industry_filtered[, 1:num_cols] <- lapply(industry_filtered[, 1:num_cols], as.numeric) 
+
+industry_correlations <- industry_filtered %>%
+  group_by(Primary.Industry) %>%
+  summarize(across(where(is.numeric), mean))
+
+head(industry_correlations, 10)
+
+```
+Depending on the industry, each variable can be strongly or negatively correlated with last sale price
+
+
+```{r}
+# Model Building
+
+# Level 1 - Individual time period observations
+
+# Every level 1 variable has a strong correlation with at least one industry, so it's best to leave all variables in the model other than Year, but highly intercorrelated variable pairs such as EBITDA and EBITDA margin you can just select one of them
+
+
+
+# Level 2 - Company (Grouping Factor)
+
+# Primary.Industry and Company Name are the only level 2 covariates
+
+
+```
+
+
+
