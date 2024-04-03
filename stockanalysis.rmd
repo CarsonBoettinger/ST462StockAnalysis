@@ -377,10 +377,21 @@ for (i in 5:ncol(df)) {
 ```{r}
 #Creating simple regressions
 #Linear
-model.a <- lm(Last.Sale.Price ~ Debt.to.Equity, data=df)
+model.a <- lm(Last.Sale.Price ~ Debt.to.Equity + EBITDA...M. + Unemployment.Rate + Current.Ratio, data=df)
 summary(model.a)
-model.b <- lm(Last.Sale.Price ~ Debt.to.Equity + Debt.to.Equity^2, data=df)
-summary(model.b)
+#Quadratic
+
+```
+
+```{r}
+# Creating frequency tables for every numeric column
+for (i in 1:ncol(df)) {
+  if (is.numeric(df[,i])) {
+    print(names(df)[i])
+    print(table(df[,i]))
+  }
+}
+
 
 ```
 
