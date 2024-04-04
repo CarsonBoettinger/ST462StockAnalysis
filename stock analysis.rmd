@@ -517,18 +517,123 @@ summary(model.e)
 ```{r}
 anova(model.d, model.e)
 ```
-Model E's AIC and BIC is significantly lower
+Model E's AIC and BIC is significantly lower than D's thus demonstrating a better fit, but some variables can be removed
+
+```{r}
+# Model F - removing the interaction factor and current ratio
+
+model.f <- lmer(Last.Sale.Price.Change.From.Baseline.... ~ Period.Numeric + Revenue_M_Scaled + Normalized_Net_Income_M_Scaled + Debt_to_Equity_Scaled + US.YOY.CPI + Fed.Funds.Rate + (Period.Numeric + Revenue_M_Scaled + Normalized_Net_Income_M_Scaled + Debt_to_Equity_Scaled + US.YOY.CPI + Fed.Funds.Rate|Company.Name), REML=T, data= fulldf)
+
+summary(model.f)
+```
+
+```{r}
+anova(model.e, model.f)
+
+```
+Model f is an improvement over e, although small
+
+```{r}
+# Model G - dropping CPI, adding Book Value/Share and Unemployment Rate
+
+model.g <- lmer(Last.Sale.Price.Change.From.Baseline.... ~ Period.Numeric + Revenue_M_Scaled + Normalized_Net_Income_M_Scaled + Book_Value_Share_Scaled + Debt_to_Equity_Scaled + Fed.Funds.Rate + Unemployment.Rate + (Period.Numeric + Revenue_M_Scaled + Normalized_Net_Income_M_Scaled + Book_Value_Share_Scaled + Debt_to_Equity_Scaled + Fed.Funds.Rate + Unemployment.Rate|Company.Name), REML=T, data= fulldf)
+
+summary(model.g)
+```
+```{r}
+anova(model.f, model.g)
+
+```
+f outperformed g surprisingly
+
+```{r}
+# Model H - dropping BV/share and adding interaction effects
+
+# model.h <- lmer(Last.Sale.Price.Change.From.Baseline.... ~ Period.Numeric*(Revenue_M_Scaled + Normalized_Net_Income_M_Scaled + Debt_to_Equity_Scaled + Fed.Funds.Rate*Unemployment.Rate) + (Period.Numeric*(Revenue_M_Scaled + Normalized_Net_Income_M_Scaled + Debt_to_Equity_Scaled + Fed.Funds.Rate*Unemployment.Rate)|Company.Name), REML=T, data= fulldf)
+
+# summary(model.h)
+
+# This would not fit, infinite loading
+
+```
+```{r}
+# Model H - dropping BV/share
+
+model.h <- lmer(Last.Sale.Price.Change.From.Baseline.... ~ Period.Numeric + Revenue_M_Scaled + Normalized_Net_Income_M_Scaled + Debt_to_Equity_Scaled + Fed.Funds.Rate + Unemployment.Rate + (Period.Numeric + Revenue_M_Scaled + Normalized_Net_Income_M_Scaled + Debt_to_Equity_Scaled + Fed.Funds.Rate + Unemployment.Rate|Company.Name), REML=T, data= fulldf)
+
+summary(model.h)
 
 
+```
+```{r}
+anova(model.f, model.h)
+
+```
+model f remains superior
+
+```{r}
+# Model I - dropping unemployment rate
+
+model.i <- lmer(Last.Sale.Price.Change.From.Baseline.... ~ Period.Numeric + Revenue_M_Scaled + Normalized_Net_Income_M_Scaled + Debt_to_Equity_Scaled + Fed.Funds.Rate + (Period.Numeric + Revenue_M_Scaled + Normalized_Net_Income_M_Scaled + Debt_to_Equity_Scaled + Fed.Funds.Rate|Company.Name), REML=T, data= fulldf)
+
+summary(model.i)
+
+```
+```{r}
+anova(model.f, model.i)
+
+```
+Model f remains the best and thus is the final model for this study, with an AIC of 89625 and BIC of 89879
+
+```{r}
+# Model F Diagnostics
 
 
+library(lme4)
+library(lmerTest)
+library(car)
+library(influence.ME)
 
 
+# Residuals Plot
+
+plot(model.f)
+
+# QQ Plotting
+
+re_effects <- ranef(model.f)
+
+# Assuming re_effects is a list obtained from ranef(model.f)
+re_effects_comp <- re_effects$Company.Name
+
+# Setup plotting area
+par(mfrow=c(3, 3)) # Adjust this if you have more than 9 effects to plot
+
+# Loop over the random effects components for Company.Name
+for (effect_name in names(re_effects_comp)) {
+  # Plot the QQ plot for the random effect
+  qqnorm(re_effects_comp[[effect_name]], main=paste("QQ Plot:", effect_name))
+  qqline(re_effects_comp[[effect_name]])
+}
+
+# Reset the plotting window
+par(mfrow=c(1, 1))
 
 
+```
+Fit looks good, outliers (stocks that either increased a lot or decreased a lot over the past 4 years have a hard time fitting but in general the model is good)
+
+QQ Plots show normal distributions for the random effects but there are outliers especially for revenue and net income (some companies perform extremely well), debt/equity, fed funds rate
+
+```{r}
 
 
+# Assuming the model is not singular now, run the influence analysis
+infl_group <- influence(model.f, group = "Company.Name")
 
+# Infinite loading - says boundary (singular) fit
 
+```
+I think we're done here
 
 
