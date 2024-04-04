@@ -16,6 +16,7 @@ knitr::opts_chunk$set(fig.show = 'asis')
 knitr::opts_chunk$set(fig.width = 7, fig.height = 7)
 
 
+
 # Import libraries
 library(gridExtra)
 library(knitr)
@@ -29,10 +30,12 @@ library(xts)
 library(PerformanceAnalytics)
 library(corrplot)
 library(dplyr)
+library(Matrix)
 
 
 # Import the CSV file
 df <- read.csv("stockdataformatted.csv")
+fulldf <- na.omit(df)
 
 # Identify missing values
 sapply(df, function(x) sum(is.na(x)))
@@ -115,7 +118,7 @@ for(n in first_10_companies) {
   }
 }
 ```
-As you can see here each company depends on different factors which affect its price
+As you can see here each company depends on different Level 1 factors which affect its price
 
 ```{r}
 # Code gets the mean correlation matrix between last sale price and all other variables
@@ -185,6 +188,8 @@ mean_correlation <- colMeans(cor_data_frame, na.rm = TRUE)
 # Output the mean correlation as a single row data frame
 mean_correlation_df <- as.data.frame(t(mean_correlation))
 
+head(mean_correlation_df)
+
 corrplot(as.matrix(mean_correlation_df), is.corr=FALSE)
 ```
 On average most variables are correlated with price, but many of these variables are also correlated with each other
@@ -251,12 +256,15 @@ if(length(full_cor_matrices) > 0 && !is.null(common_columns)) {
   cat("No correlation matrices available to compute the mean matrix.\n")
 }
 
+
+head(mean_cor_matrix)
+
 ```
 This is way more accurate than the full correlation matrix from earlier
 
 ```{r}
 
-# Does the same thing as the mean correlation matrix between last sale price and all other variables but groups by industry
+# Does the same thing as the mean correlation matrix between last sale price and all other variables but groups by industry (level 2)
 
 # Initialize a list to store the correlation data for each company
 cor_data_list <- list()
@@ -348,21 +356,179 @@ head(industry_correlations, 10)
 Depending on the industry, each variable can be strongly or negatively correlated with last sale price
 
 
+Model Building
+
+Level 1 - Individual time period observations
+
+Every level 1 variable has a strong correlation with at least one industry, so it's best to leave all variables in the model other than Year, but highly intercorrelated variable pairs such as EBITDA and EBITDA margin you can just select one of them
+
+Selected Variables - Last Sale Price Change from Baseline (response), Revenue, EBITDA, Normalized Net Income, Gross Profit Margin, EBITDA Margin, Normalized Net Income Margin, Debt to Equity, Current Ratio, CPI, Unemployment Rate, Fed Funds Rate, Book Value per Share
+
+Strong intercorrelation with revenue, ebitda, normalized net income, and their margins
+
+Debt/Equity negatively correlated with book value per share
+
+CPI and Fed Funds negatively correlated with Unemployment rate but not correlated to each other 
+
+
+
+Level 2 - Company (Grouping Factor)
+
+Primary.Industry and Company Name are the only level 2 variables
+
+All level 1 variables other than CPI, Fed Funds, Unemployment Rate vary based on Company Name
+
+The company heavily affects the weighting of each variable on the response
+
+The industry also affects the weighting of each variable on the response, but the company will be the most accurate, so maybe industry should be dropped
+
+
 ```{r}
-# Model Building
+# Model A (Unconditinal means model)
 
-# Level 1 - Individual time period observations
+model.a <- lmer(fulldf$Last.Sale.Price.Change.From.Baseline.... ~ 1 + (1|fulldf$Company.Name), REML = T, data = fulldf)
 
-# Every level 1 variable has a strong correlation with at least one industry, so it's best to leave all variables in the model other than Year, but highly intercorrelated variable pairs such as EBITDA and EBITDA margin you can just select one of them
+summary(model.a)
+
+```
+Looking at the random effects, the variation of 8070 suggests that there are large differences in variation between companies when it comes to their stock price movements. The residual variance of 5358 shows the deviation of the stock prices for the same company for all the quarters compared to the mean baseline change of the same school.
+
+Intercept of 40.309 suggests that the average stock price level between Q1 2019 and Q4 2023 was 1.4x its baseline value.
+
+~60% of total variation in stock price levels is attributable to differences between companies rather than changes over time in the same company.
+
+```{r}
+# Model B (Unconditional growth)
+
+head(fulldf)
+
+# Period.Ending needs to be converted into a numeric variable
+
+# Extract year and quarter
+fulldf$Year <- as.numeric(substr(fulldf$Period.Ending, 4, 7))
+fulldf$Quarter <- as.numeric(substr(fulldf$Period.Ending, 3, 3))
+
+# Calculate the numeric representation
+# Assuming FQ12019 is the first quarter (0) and incrementing by 1 for each subsequent quarter
+fulldf$Period.Numeric <- ((fulldf$Year - 2019) * 4) + (fulldf$Quarter - 1)
 
 
+model.b <- lmer(fulldf$Last.Sale.Price.Change.From.Baseline.... ~ fulldf$Period.Numeric + (fulldf$Period.Numeric|fulldf$Company.Name), REML=T, data= fulldf)
 
-# Level 2 - Company (Grouping Factor)
-
-# Primary.Industry and Company Name are the only level 2 covariates
+summary(model.b)
 
 
 ```
+625.61 represents the variance between companies in baseline price (baseline price should be constant for all companies but some have incomplete data due to NA values hence the extreme variance)
+
+This also applies to the estimate of the intercept being 1.3661 instead of zero
+
+63.84 represents the variance between companies in rates of change in stock prices during the 20 quarter period
+
+2598.21 is the variance within companies which makes sense which between 2019 and 2023 prices can change greatly
+
+```{r}
+anova(model.a, model.b)
+```
+```{r}
+# Model C (adds industry to the level 2 variables)
+
+model.c <- lmer(Last.Sale.Price.Change.From.Baseline.... ~ Period.Numeric + as.factor(Primary.Industry):Period.Numeric + (Period.Numeric|Company.Name), REML=T, data= fulldf)
+
+summary(model.c)
+
+anova(model.b, model.c)
+
+```
+As you can see here, adding the primary industry to the model provides a wide range of estimate stock price mean increases/decreases over the course of the 4 years. However, this complicates the model a lot and results in higher AIC and BIC scores, so industry will be dropped.
+
+```{r}
+# Model D - adds all the chosen level 1 variables
+
+# Selected Variables - Last Sale Price Change from Baseline (response), Revenue, EBITDA, Normalized Net Income, Gross Profit Margin, EBITDA Margin, Normalized Net Income Margin, Debt to Equity, Current Ratio, CPI, Unemployment Rate, Fed Funds Rate, Book Value per Share
+
+# Strong intercorrelation with revenue, ebitda, normalized net income, and their margins
+
+# Debt/Equity negatively correlated with book value per share
+
+# CPI and Fed Funds negatively correlated with Unemployment rate but not correlated with eachother 
+
+head(fulldf)
+
+# model.d <- lmer(Last.Sale.Price.Change.From.Baseline.... ~ Period.Numeric + Revenue...M. + EBITDA...M. + Normalized.Net.Income...M. + Gross.Profit.Margin + EBITDA.Margin + Normalized.Net.Income.Margin + Debt.to.Equity + Current.Ratio + US.YOY.CPI + Unemployment.Rate + Fed.Funds.Rate + Book.Value.Share + (Period.Numeric + Revenue...M. + EBITDA...M. + Normalized.Net.Income...M. + Gross.Profit.Margin + EBITDA.Margin + Normalized.Net.Income.Margin + Debt.to.Equity + Current.Ratio + US.YOY.CPI + Unemployment.Rate + Fed.Funds.Rate + Book.Value.Share|Company.Name), REML=T, data= fulldf)
+
+# Fitting the model resulted in infinite loading screen, try smaller model
+
+# Interaction Terms
+# Revenue...M.*EBITDA...M.*Normalized.Net.Income...M.*Gross.Profit.Margin*EBITDA.Margin*Normalized.Net.Income.Margin
+# Unemployment.Rate*(US.YOY.CPI + Fed.Funds.Rate)
+
+# Rescale all variables
+
+library(dplyr)
+
+fulldf <- fulldf %>%
+  group_by(Company.Name) %>%
+  mutate(Last_Price_M_Scaled = `Last.Sale.Price` / max(`Last.Sale.Price`, na.rm = TRUE),
+         Revenue_M_Scaled = `Revenue...M.` / max(`Revenue...M.`, na.rm = TRUE),
+         EBITDA_M_Scaled = `EBITDA...M.` / max(`EBITDA...M.`, na.rm = TRUE),
+         Normalized_Net_Income_M_Scaled = `Normalized.Net.Income...M.` / max(`Normalized.Net.Income...M.`, na.rm = TRUE),
+         Book_Value_Share_Scaled = `Book.Value.Share` / max(`Book.Value.Share`, na.rm = TRUE),
+         Debt_to_Equity_Scaled = `Debt.to.Equity` / max(`Debt.to.Equity`, na.rm = TRUE)) %>%
+  ungroup()
+
+head(fulldf, 10)
+
+# Try Again
+
+model.d <- lmer(Last.Sale.Price.Change.From.Baseline.... ~ Period.Numeric + Revenue_M_Scaled + (Period.Numeric + Revenue_M_Scaled|Company.Name), REML=T, data= fulldf)
+
+summary(model.d)
+
+```
+This makes more sense,
+
+Random Effects
+2047.18 -> variance in baseline price between companies (as all should be 0 to start)
+31.26 -> variance in slope for price changes between companies
+14907.96 -> variance in how revenue affects price across different companies, indicating that for some companies revenue may have a huge impact whereas for others none at all
+
+Fixed Effects
+-34.0342 -> mean baseline price when all predictors are 0, it goes negative because revenue is never zero
+2.7372 -> over time stock prices went up during this time, all else being constant
+67.5486 -> an addition of a company's max revenue during the time period will increase the price 67.5486 over its baseline
+
+```{r}
+anova(model.b, model.d)
+
+```
+Lower AIC BIC for model.d which is a good sign
+
+```{r}
+# Model E - adding more and more variables
+
+model.e <- lmer(Last.Sale.Price.Change.From.Baseline.... ~ Period.Numeric + Revenue_M_Scaled + Normalized_Net_Income_M_Scaled + Revenue_M_Scaled:Normalized_Net_Income_M_Scaled + Debt_to_Equity_Scaled + Current.Ratio + US.YOY.CPI + Fed.Funds.Rate + (Period.Numeric + Revenue_M_Scaled + Normalized_Net_Income_M_Scaled + Debt_to_Equity_Scaled + Current.Ratio + US.YOY.CPI + Fed.Funds.Rate|Company.Name), REML=T, data= fulldf)
+
+# This model takes forever to fit therefore leaving out any level 1 variable that is correlated with any other level 1 variable, but leaving in normalized net income 
+
+summary(model.e)
+
+```
+```{r}
+anova(model.d, model.e)
+```
+Model E's AIC and BIC is significantly lower
+
+
+
+
+
+
+
+
+
+
+
 
 
 
