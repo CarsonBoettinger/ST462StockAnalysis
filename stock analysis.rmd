@@ -10,6 +10,9 @@ editor_options:
 
 
 ```{r setup, include=FALSE}
+
+# This section imports the formatted dataset and splits it into one dataframe for each company
+
 knitr::opts_chunk$set(echo = TRUE)
 knitr::opts_chunk$set(error = TRUE)
 knitr::opts_chunk$set(fig.show = 'asis')
@@ -56,6 +59,9 @@ correlations_by_company <- list()
 
 
 ```{r}
+# This section runs a correlation matrix for each variable in the dataset but doesn't take into account that multiple rows cover the same time period and instead treats every row independently
+
+
 # Select only the numeric columns
 numeric_df <- df %>% select_if(is.numeric)
 
@@ -65,11 +71,11 @@ cor_matrix <- cor(numeric_df, use = "complete.obs")
 # Visualize the correlation matrix
 corrplot(cor_matrix, method = "circle")
 ```
-This is likely inaccurate due to a repeating of quarters for every company
+This is inaccurate due to each variable not being grouped by company first and instead treating every row like a new quarter
 
 ```{r}
 
-# Code below gets the correlations for the first 10 companies between last sale price and the rest of the variables
+# Code below gets the correlations for the first 10 companies between last sale price and the rest of the variables, this ensures that for each correlation plot only 20 time periods are being sampled since there are only 20 quarters worth of data
 
 
 # Get the names of the first 10 companies from the list
@@ -121,7 +127,7 @@ for(n in first_10_companies) {
 As you can see here each company depends on different Level 1 factors which affect its price
 
 ```{r}
-# Code gets the mean correlation matrix between last sale price and all other variables
+# Code gets the mean correlation matrix between last sale price and all other variables, essentially it sums the matrices in the previous chunk for ALL the companies and then averages it out
 
 
 # Initialize a list to store the correlation data for each company
@@ -192,10 +198,10 @@ head(mean_correlation_df)
 
 corrplot(as.matrix(mean_correlation_df), is.corr=FALSE)
 ```
-On average most variables are correlated with price, but many of these variables are also correlated with each other
+On average most variables are correlated with price, but many of these variables are also correlated with each other as we'll see next
 
 ```{r}
-# Calculating the mean full correlation matrix
+# Calculating the mean full correlation matrix, so essentially the previous chart but for every single variable instead
 
 
 # Initialize a list to store the full correlation matrix for each company
@@ -260,11 +266,11 @@ if(length(full_cor_matrices) > 0 && !is.null(common_columns)) {
 head(mean_cor_matrix)
 
 ```
-This is way more accurate than the full correlation matrix from earlier
+This is way more accurate than the full correlation matrix from earlier, you can clearly see that multiples variables are correlated with each other
 
 ```{r}
 
-# Does the same thing as the mean correlation matrix between last sale price and all other variables but groups by industry (level 2)
+# Does the same thing as the mean correlation matrix between last sale price and all other variables (two graphs ago) but groups by industry (level 2)
 
 # Initialize a list to store the correlation data for each company
 cor_data_list <- list()
@@ -356,6 +362,10 @@ head(industry_correlations, 10)
 Depending on the industry, each variable can be strongly or negatively correlated with last sale price
 
 
+
+
+Confirmatory Data Analysis
+
 Model Building
 
 Level 1 - Individual time period observations
@@ -430,6 +440,8 @@ This also applies to the estimate of the intercept being 1.3661 instead of zero
 ```{r}
 anova(model.a, model.b)
 ```
+Model B is obviously ahead of Model A
+
 ```{r}
 # Model C (adds industry to the level 2 variables)
 
@@ -443,7 +455,7 @@ anova(model.b, model.c)
 As you can see here, adding the primary industry to the model provides a wide range of estimate stock price mean increases/decreases over the course of the 4 years. However, this complicates the model a lot and results in higher AIC and BIC scores, so industry will be dropped.
 
 ```{r}
-# Model D - adds all the chosen level 1 variables
+# Model D - adds all the chosen level 1 variables (this didn't work)
 
 # Selected Variables - Last Sale Price Change from Baseline (response), Revenue, EBITDA, Normalized Net Income, Gross Profit Margin, EBITDA Margin, Normalized Net Income Margin, Debt to Equity, Current Ratio, CPI, Unemployment Rate, Fed Funds Rate, Book Value per Share
 
@@ -463,7 +475,12 @@ head(fulldf)
 # Revenue...M.*EBITDA...M.*Normalized.Net.Income...M.*Gross.Profit.Margin*EBITDA.Margin*Normalized.Net.Income.Margin
 # Unemployment.Rate*(US.YOY.CPI + Fed.Funds.Rate)
 
-# Rescale all variables
+
+
+
+
+
+# Rescale all variables to a value between 0 and 1, 1 being the maximum value in a column for each company and everything else relative to that, add the rescaled variables to the dataframe
 
 library(dplyr)
 
@@ -479,14 +496,14 @@ fulldf <- fulldf %>%
 
 head(fulldf, 10)
 
-# Try Again
+# Try Again but drop all level 1's except for revenue to make sure the fitting works with the rescaled data 
 
 model.d <- lmer(Last.Sale.Price.Change.From.Baseline.... ~ Period.Numeric + Revenue_M_Scaled + (Period.Numeric + Revenue_M_Scaled|Company.Name), REML=T, data= fulldf)
 
 summary(model.d)
 
 ```
-This makes more sense,
+This makes more sense
 
 Random Effects
 2047.18 -> variance in baseline price between companies (as all should be 0 to start)
@@ -502,10 +519,10 @@ Fixed Effects
 anova(model.b, model.d)
 
 ```
-Lower AIC BIC for model.d which is a good sign
+Lower AIC BIC for model.d which is a good sign, revenue is statistically significant
 
 ```{r}
-# Model E - adding more and more variables
+# Model E - adding more and more variables and an interaction term
 
 model.e <- lmer(Last.Sale.Price.Change.From.Baseline.... ~ Period.Numeric + Revenue_M_Scaled + Normalized_Net_Income_M_Scaled + Revenue_M_Scaled:Normalized_Net_Income_M_Scaled + Debt_to_Equity_Scaled + Current.Ratio + US.YOY.CPI + Fed.Funds.Rate + (Period.Numeric + Revenue_M_Scaled + Normalized_Net_Income_M_Scaled + Debt_to_Equity_Scaled + Current.Ratio + US.YOY.CPI + Fed.Funds.Rate|Company.Name), REML=T, data= fulldf)
 
@@ -517,7 +534,7 @@ summary(model.e)
 ```{r}
 anova(model.d, model.e)
 ```
-Model E's AIC and BIC is significantly lower than D's thus demonstrating a better fit, but some variables can be removed
+Model E's AIC and BIC is significantly lower than D's thus demonstrating a better fit, but some variables can be removed like the interaction term and current ratio which are not significant
 
 ```{r}
 # Model F - removing the interaction factor and current ratio
@@ -544,7 +561,7 @@ summary(model.g)
 anova(model.f, model.g)
 
 ```
-f outperformed g surprisingly
+f outperformed g surprisingly, thus sticking to f
 
 ```{r}
 # Model H - dropping BV/share and adding interaction effects
@@ -569,10 +586,10 @@ summary(model.h)
 anova(model.f, model.h)
 
 ```
-model f remains superior
+Model F remains superior, the only difference between F and G is that F has CPI and G has Unemployment rate which is actually more significant than CPI but for some reason results in a lower AIC BIC
 
 ```{r}
-# Model I - dropping unemployment rate
+# Model I - dropping unemployment rate, essentially Model F without CPI
 
 model.i <- lmer(Last.Sale.Price.Change.From.Baseline.... ~ Period.Numeric + Revenue_M_Scaled + Normalized_Net_Income_M_Scaled + Debt_to_Equity_Scaled + Fed.Funds.Rate + (Period.Numeric + Revenue_M_Scaled + Normalized_Net_Income_M_Scaled + Debt_to_Equity_Scaled + Fed.Funds.Rate|Company.Name), REML=T, data= fulldf)
 
@@ -583,7 +600,7 @@ summary(model.i)
 anova(model.f, model.i)
 
 ```
-Model f remains the best and thus is the final model for this study, with an AIC of 89625 and BIC of 89879
+Model F remains the best and thus is the final model for this study, with an AIC of 89625 and BIC of 89879.
 
 ```{r}
 # Model F Diagnostics
